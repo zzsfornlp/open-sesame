@@ -27,14 +27,22 @@ optpr.add_option("--roc", type="int", default=2)
 optpr.add_option("--hier", action="store_true", default=False)
 optpr.add_option("--syn", type="choice", choices=["dep", "constit", "none"], default="none")
 optpr.add_option("--ptb", action="store_true", default=False)
-optpr.add_option("--raw_input", type="str", metavar="FILE")
+optpr.add_option("-i", "--raw_input", type="str", metavar="FILE")
+optpr.add_option("-o", "--output", type="str", metavar="FILE")
 optpr.add_option("--config", type="str", metavar="FILE")
 (options, args) = optpr.parse_args()
 
-model_dir = "logs/{}/".format(options.model_name)
-model_file_name = "{}best-argid-{}-model".format(model_dir, VERSION)
-if not os.path.exists(model_dir):
-    os.makedirs(model_dir)
+# model_dir = "logs/{}/".format(options.model_name)
+# model_file_name = "{}best-argid-{}-model".format(model_dir, VERSION)
+# if not os.path.exists(model_dir):
+#     os.makedirs(model_dir)
+
+# =====
+# for prediction
+model_dir = options.model_name
+model_file_name = model_dir + "/best-argid-1.7-model"
+assert os.path.isdir(model_dir) and os.path.isfile(model_file_name), "Cannot find model file"
+# =====
 
 if options.exemplar:
     train_conll = TRAIN_EXEMPLAR
@@ -107,7 +115,8 @@ elif options.mode in ["test", "ensemble"]:
 elif options.mode == "predict":
     assert options.raw_input is not None
     instances, _, _ = read_conll(options.raw_input)
-    out_conll_file = "{}predicted-args.conll".format(model_dir)
+    # out_conll_file = "{}predicted-args.conll".format(model_dir)
+    out_conll_file = options.output
 else:
     raise Exception("Invalid parser mode", options.mode)
 
@@ -1038,6 +1047,7 @@ elif options.mode == "test":
 
 elif options.mode == "predict":
     predictions = []
+    sys.stderr.write("Starting to predict, all instances are {} ...\n".format(len(instances)))
     for instance in instances:
         prediction = identify_fes(instance.tokens,
                                   instance.sentence,

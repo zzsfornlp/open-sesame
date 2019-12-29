@@ -15,14 +15,24 @@ optpr = OptionParser()
 optpr.add_option("--mode", dest="mode", type="choice",
                  choices=["train", "test", "refresh", "predict"], default="train")
 optpr.add_option("-n", "--model_name", help="Name of model directory to save model to.")
-optpr.add_option("--raw_input", type="str", metavar="FILE")
+optpr.add_option("-i", "--raw_input", type="str", metavar="FILE")
+optpr.add_option("-o", "--output", type="str", metavar="FILE")
+# optpr.add_option("--output_sid", type="str", metavar="FILE", help="Sent-Ids for each frames")
+optpr.add_option("--filter_pos", type="str", help="Only care about frames triggered by which poses, separated by ','")
 optpr.add_option("--config", type="str", metavar="FILE")
 (options, args) = optpr.parse_args()
 
-model_dir = "logs/{}/".format(options.model_name)
-model_file_name = "{}best-targetid-{}-model".format(model_dir, VERSION)
-if not os.path.exists(model_dir):
-    os.makedirs(model_dir)
+# model_dir = "logs/{}/".format(options.model_name)
+# model_file_name = "{}best-targetid-{}-model".format(model_dir, VERSION)
+# if not os.path.exists(model_dir):
+#     os.makedirs(model_dir)
+
+# =====
+# for prediction
+model_dir = options.model_name
+model_file_name = model_dir + "/best-targetid-1.7-model"
+assert os.path.isdir(model_dir) and os.path.isfile(model_file_name), "Cannot find model file"
+# =====
 
 train_conll = TRAIN_FTE
 
@@ -73,6 +83,42 @@ PRETRAINED_DIM = len(pretrained_map.values()[0])
 lock_dicts()
 UNKTOKEN = VOCDICT.getid(UNK)
 
+# =====
+import nltk
+lemmatizer = nltk.stem.WordNetLemmatizer()
+from conll09 import CoNLL09Element, CoNLL09Example
+from sentence import Sentence
+import json
+
+def new_make_data_instances(text, gindex):
+    """
+    Read the specific json format: return a list of sent instances
+    """
+    doc = json.loads(text)
+    rets = []
+    global_index = gindex
+    for sent in doc["sents"]:
+        tokenized = sent["text"]
+        # tokenized = nltk.tokenize.word_tokenize(text.lstrip().rstrip())
+        pos_tagged = [p[1] for p in nltk.pos_tag(tokenized)]
+
+        lemmatized = [lemmatizer.lemmatize(tokenized[i])
+                        if not pos_tagged[i].startswith("V") else lemmatizer.lemmatize(tokenized[i], pos='v')
+                        for i in range(len(tokenized))]
+
+        conll_lines = [u"{}\t{}\t_\t{}\t_\t{}\t{}\t_\t_\t_\t_\t_\t_\t_\tO\n".format(
+            i+1, tokenized[i], lemmatized[i], pos_tagged[i], global_index) for i in range(len(tokenized))]
+        elements = [CoNLL09Element(conll_line) for conll_line in conll_lines]
+
+        sentence = Sentence(syn_type=None, elements=elements)
+        instance = CoNLL09Example(sentence, elements)
+
+        rets.append(instance)
+        global_index += 1
+
+    return rets, global_index
+# =====
+
 if options.mode in ["train", "refresh"]:
     dev_examples, _, _ = read_conll(DEV_CONLL)
     combined_dev = combine_examples(dev_examples)
@@ -83,11 +129,26 @@ elif options.mode  == "test":
     out_conll_file = "{}predicted-{}-targetid-test.conll".format(model_dir, VERSION)
 elif options.mode == "predict":
     assert options.raw_input is not None
-    with open(options.raw_input, "r") as fin:
-        instances = [make_data_instance(line, i) for i,line in enumerate(fin)]
-    out_conll_file = "{}predicted-targets.conll".format(model_dir)
+    # with open(options.raw_input, "r") as fin:
+    #     instances = [make_data_instance(line, i) for i,line in enumerate(fin)]
+    with codecs.open(options.raw_input, "r", "utf-8") as fin:
+        # read all the sentences
+        instances = []
+        global_sid = 0
+        for i, line in enumerate(fin):
+            if len(line.strip())>0:
+                new_insts, new_gsid = new_make_data_instances(line, global_sid)
+                instances.extend(new_insts)
+                global_sid = new_gsid
+    # out_conll_file = "{}predicted-targets.conll".format(model_dir)
+    out_conll_file = options.output
 else:
     raise Exception("Invalid parser mode", options.mode)
+
+# =====
+# out_sid_file = options.output_sid
+filter_pos_set = set(options.filter_pos.split(","))
+# =====
 
 # Default configurations.
 configuration = {"train": train_conll,
@@ -315,11 +376,17 @@ def print_as_conll(gold_examples, predicted_target_dict):
     Spits out one CoNLL for each LU.
     """
     with codecs.open(out_conll_file, "w", "utf-8") as conll_file:
+            # codecs.open(out_sid_file, "w", "utf-8") as sid_file:
+        sid = 0
         for gold, pred in zip(gold_examples, predicted_target_dict):
             for target in sorted(pred):
-                result = gold.get_predicted_target_conll(target, pred[target][0]) + "\n"
-                conll_file.write(result)
+                if LUPOSDICT.getstr(pred[target][0].posid) in filter_pos_set:
+                    result = gold.get_predicted_target_conll(target, pred[target][0]) + "\n"
+                    conll_file.write(result)
+                    # sid_file.write(str(sid)+"\n")  # write sid for current instance
+            sid += 1
         conll_file.close()
+        # sid_file.close()
 
 
 best_dev_f1 = 0.0
@@ -431,6 +498,7 @@ elif options.mode == "predict":
     model.populate(model_file_name)
 
     predictions = []
+    sys.stderr.write("Starting to predict, all instances are {} ...\n".format(len(instances)))
     for instance in instances:
         _, prediction = identify_targets(builders, instance.tokens, instance.postags, instance.lemmas)
         predictions.append(prediction)

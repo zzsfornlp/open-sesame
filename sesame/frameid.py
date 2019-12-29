@@ -16,14 +16,22 @@ optpr.add_option("--mode", dest="mode", type="choice", choices=["train", "test",
 optpr.add_option("-n", "--model_name", help="Name of model directory to save model to.")
 optpr.add_option("--hier", action="store_true", default=False)
 optpr.add_option("--exemplar", action="store_true", default=False)
-optpr.add_option("--raw_input", type="str", metavar="FILE")
+optpr.add_option("-i", "--raw_input", type="str", metavar="FILE")
+optpr.add_option("-o", "--output", type="str", metavar="FILE")
 optpr.add_option("--config", type="str", metavar="FILE")
 (options, args) = optpr.parse_args()
 
-model_dir = "logs/{}/".format(options.model_name)
-model_file_name = "{}best-frameid-{}-model".format(model_dir, VERSION)
-if not os.path.exists(model_dir):
-    os.makedirs(model_dir)
+# model_dir = "logs/{}/".format(options.model_name)
+# model_file_name = "{}best-frameid-{}-model".format(model_dir, VERSION)
+# if not os.path.exists(model_dir):
+#     os.makedirs(model_dir)
+
+# =====
+# for prediction
+model_dir = options.model_name
+model_file_name = model_dir + "/best-frameid-1.7-model"
+assert os.path.isdir(model_dir) and os.path.isfile(model_file_name), "Cannot find model file"
+# =====
 
 if options.exemplar:
     train_conll = TRAIN_EXEMPLAR
@@ -83,7 +91,8 @@ elif options.mode  == "test":
 elif options.mode == "predict":
     assert options.raw_input is not None
     instances, _, _ = read_conll(options.raw_input)
-    out_conll_file = "{}predicted-frames.conll".format(model_dir)
+    # out_conll_file = "{}predicted-frames.conll".format(model_dir)
+    out_conll_file = options.output
 else:
     raise Exception("Invalid parser mode", options.mode)
 
@@ -407,6 +416,7 @@ elif options.mode == "predict":
     model.populate(model_file_name)
 
     predictions = []
+    sys.stderr.write("Starting to predict, all instances are {} ...\n".format(len(instances)))
     for instance in instances:
         _, prediction = identify_frames(builders, instance.tokens, instance.postags, instance.lu, instance.targetframedict.keys())
         predictions.append(prediction)
